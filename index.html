@@ -3,8 +3,8 @@
   <head>
       <meta charset="UTF-8">
       <title>محرر نصوص PDF</title>
-      <script src="https://unpkg.com/pdf-lib@1.17.1"></script>
       <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
       <style>
           body {
               font-family: Arial, sans-serif;
@@ -31,6 +31,19 @@
           button:hover {
               background-color: #45a049;
           }
+          .editor-panel {
+              margin: 15px 0;
+              padding: 15px;
+              background-color: #f8f9fa;
+              border-radius: 4px;
+          }
+          .text-input {
+              width: 100%;
+              padding: 8px;
+              margin: 10px 0;
+              border: 1px solid #ddd;
+              border-radius: 4px;
+          }
           #textLayer {
               position: absolute;
               left: 0;
@@ -38,54 +51,66 @@
               right: 0;
               bottom: 0;
               overflow: hidden;
-              opacity: 0.2;
               line-height: 1.0;
+              pointer-events: none;
           }
-          #textLayer > span {
-              color: transparent;
+          #annotationLayer {
               position: absolute;
-              white-space: pre;
-              cursor: text;
-              transform-origin: 0% 0%;
-          }
-          #textLayer > span:hover {
-              background-color: rgba(255, 255, 0, 0.4);
+              left: 0;
+              top: 0;
+              right: 0;
+              bottom: 0;
+              overflow: hidden;
           }
           .canvas-container {
               position: relative;
               margin-top: 20px;
               border: 1px solid #ddd;
           }
-          #selectedText {
-              margin: 10px 0;
-              padding: 10px;
-              border: 1px solid #ddd;
-              border-radius: 4px;
+          .text-element {
+              position: absolute;
+              cursor: pointer;
+              padding: 2px;
+              border-radius: 2px;
+          }
+          .text-element:hover {
+              background-color: rgba(255, 255, 0, 0.3);
+          }
+          .selected {
+              background-color: rgba(255, 255, 0, 0.5);
           }
       </style>
   </head>
   <body>
       <div class="container">
           <h1>محرر نصوص PDF</h1>
-          <input type="file" id="pdfFile" accept=".pdf" />
-          <button onclick="loadPDF()">فتح PDF</button>
-          <div id="selectedText">
-              <p>النص المحدد: <span id="selectedTextContent"></span></p>
-              <input type="text" id="newText" placeholder="أدخل النص الجديد" />
-              <button onclick="replaceText()">تعديل النص</button>
+          <div class="editor-panel">
+              <input type="file" id="pdfFile" accept=".pdf" />
+              <button onclick="loadPDF()">فتح PDF</button>
           </div>
+          
+          <div class="editor-panel" id="editPanel" style="display: none;">
+              <h3>تعديل النص</h3>
+              <p>النص المحدد: <span id="selectedText"></span></p>
+              <input type="text" id="newText" class="text-input" placeholder="أدخل النص الجديد" />
+              <button onclick="updateText()">تحديث النص</button>
+              <button onclick="savePDF()">حفظ PDF</button>
+          </div>
+
           <div class="canvas-container">
               <canvas id="pdfCanvas"></canvas>
-              <div id="textLayer"></div>
+              <div id="annotationLayer"></div>
           </div>
       </div>
 
       <script>
           pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
           
-          let pdfDoc = null;
-          let selectedTextElement = null;
-          let originalPdfBytes = null;
+          let currentPDF = null;
+          let currentPage = 1;
+          let currentScale = 1.5;
+          let textItems = [];
+          let selectedTextItem = null;
 
           async function loadPDF() {
               const fileInput = document.getElementById('pdfFile');
@@ -97,57 +122,11 @@
 
               const reader = new FileReader();
               reader.onload = async function(e) {
-                  originalPdfBytes = new Uint8Array(e.target.result);
                   try {
-                      pdfDoc = await pdfjsLib.getDocument(originalPdfBytes).promise;
-                      const page = await pdfDoc.getPage(1);
-                      const viewport = page.getViewport({scale: 1.5});
-
-                      // إعداد canvas
-                      const canvas = document.getElementById('pdfCanvas');
-                      const context = canvas.getContext('2d');
-                      canvas.height = viewport.height;
-                      canvas.width = viewport.width;
-
-                      // عرض PDF
-                      await page.render({
-                          canvasContext: context,
-                          viewport: viewport
-                      }).promise;
-
-                      // استخراج النص
-                      const textContent = await page.getTextContent();
-                      const textLayer = document.getElementById('textLayer');
-                      textLayer.style.width = viewport.width + 'px';
-                      textLayer.style.height = viewport.height + 'px';
-
-                      // عرض النص مع إمكانية التحديد
-                      textContent.items.forEach(item => {
-                          const tx = pdfjsLib.Util.transform(
-                              viewport.transform,
-                              item.transform
-                          );
-                          const style = textContent.styles[item.fontName];
-                          
-                          const textElement = document.createElement('span');
-                          textElement.textContent = item.str;
-                          textElement.style.left = tx[4] + 'px';
-                          textElement.style.top = tx[5] + 'px';
-                          textElement.style.fontSize = Math.sqrt((tx[0] * tx[0]) + (tx[1] * tx[1])) + 'px';
-                          textElement.style.fontFamily = style.fontFamily;
-                          
-                          textElement.addEventListener('click', function() {
-                              if (selectedTextElement) {
-                                  selectedTextElement.style.backgroundColor = '';
-                              }
-                              selectedTextElement = textElement;
-                              textElement.style.backgroundColor = 'rgba(255, 255, 0, 0.4)';
-                              document.getElementById('selectedTextContent').textContent = textElement.textContent;
-                          });
-                          
-                          textLayer.appendChild(textElement);
-                      });
-
+                      const pdfData = new Uint8Array(e.target.result);
+                      currentPDF = await pdfjsLib.getDocument(pdfData).promise;
+                      await renderPage(currentPage);
+                      document.getElementById('editPanel').style.display = 'block';
                   } catch (error) {
                       console.error('خطأ في تحميل PDF:', error);
                       alert('حدث خطأ في تحميل الملف');
@@ -156,41 +135,100 @@
               reader.readAsArrayBuffer(file);
           }
 
-          async function replaceText() {
-              if (!selectedTextElement) {
+          async function renderPage(pageNumber) {
+              const page = await currentPDF.getPage(pageNumber);
+              const viewport = page.getViewport({ scale: currentScale });
+
+              const canvas = document.getElementById('pdfCanvas');
+              const context = canvas.getContext('2d');
+              canvas.height = viewport.height;
+              canvas.width = viewport.width;
+
+              await page.render({
+                  canvasContext: context,
+                  viewport: viewport
+              }).promise;
+
+              const textContent = await page.getTextContent();
+              const annotationLayer = document.getElementById('annotationLayer');
+              annotationLayer.innerHTML = '';
+              annotationLayer.style.width = viewport.width + 'px';
+              annotationLayer.style.height = viewport.height + 'px';
+
+              textItems = [];
+              textContent.items.forEach((item, index) => {
+                  const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
+                  
+                  const textElement = document.createElement('div');
+                  textElement.className = 'text-element';
+                  textElement.textContent = item.str;
+                  textElement.style.left = `${tx[4]}px`;
+                  textElement.style.top = `${tx[5]}px`;
+                  textElement.style.fontSize = `${Math.sqrt((tx[0] * tx[0]) + (tx[1] * tx[1]))}px`;
+                  textElement.style.transformOrigin = '0% 0%';
+                  
+                  textElement.addEventListener('click', () => selectText(index, textElement));
+                  
+                  annotationLayer.appendChild(textElement);
+                  textItems.push({
+                      element: textElement,
+                      text: item.str,
+                      font: item.fontName,
+                      originalPosition: { x: tx[4], y: tx[5] }
+                  });
+              });
+          }
+
+          function selectText(index, element) {
+              if (selectedTextItem) {
+                  selectedTextItem.element.classList.remove('selected');
+              }
+              selectedTextItem = textItems[index];
+              element.classList.add('selected');
+              document.getElementById('selectedText').textContent = selectedTextItem.text;
+              document.getElementById('newText').value = selectedTextItem.text;
+          }
+
+          function updateText() {
+              if (!selectedTextItem) {
                   alert('الرجاء تحديد نص للتعديل');
                   return;
               }
-
               const newText = document.getElementById('newText').value;
               if (!newText) {
                   alert('الرجاء إدخال النص الجديد');
                   return;
               }
+              
+              selectedTextItem.element.textContent = newText;
+              selectedTextItem.text = newText;
+          }
 
-              try {
-                  const PDFLib = window['pdf-lib'];
-                  const pdfDoc = await PDFLib.PDFDocument.load(originalPdfBytes);
-                  const pages = pdfDoc.getPages();
-                  const firstPage = pages[0];
-
-                  // استبدال النص
-                  const oldText = selectedTextElement.textContent;
-                  const modifiedPdfBytes = await pdfDoc.save();
-
-                  // تحميل الملف المعدل
-                  const blob = new Blob([modifiedPdfBytes], { type: 'application/pdf' });
-                  const url = URL.createObjectURL(blob);
-                  const link = document.createElement('a');
-                  link.href = url;
-                  link.download = 'modified.pdf';
-                  link.click();
-                  URL.revokeObjectURL(url);
-
-              } catch (error) {
-                  console.error('خطأ في تعديل PDF:', error);
-                  alert('حدث خطأ في تعديل الملف');
-              }
+          function savePDF() {
+              const canvas = document.getElementById('pdfCanvas');
+              const annotationLayer = document.getElementById('annotationLayer');
+              
+              // إنشاء canvas جديد للدمج
+              const finalCanvas = document.createElement('canvas');
+              finalCanvas.width = canvas.width;
+              finalCanvas.height = canvas.height;
+              const ctx = finalCanvas.getContext('2d');
+              
+              // نسخ الخلفية
+              ctx.drawImage(canvas, 0, 0);
+              
+              // رسم النصوص المعدلة
+              ctx.font = '16px Arial'; // يمكنك تعديل الخط حسب الحاجة
+              textItems.forEach(item => {
+                  ctx.fillText(item.text, item.originalPosition.x, item.originalPosition.y);
+              });
+              
+              // تحميل الملف
+              const dataUrl = finalCanvas.toDataURL('image/png');
+              const link = document.createElement('a');
+              link.download = 'modified_pdf.png';
+              link.href = dataUrl;
+              link.click();
           }
       </script>
   </body>
