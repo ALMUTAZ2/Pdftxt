@@ -2,9 +2,9 @@
   <html dir="rtl">
   <head>
       <meta charset="UTF-8">
-      <title>محرر نصوص PDF المتقدم</title>
+      <title>محرر نصوص PDF مع OCR</title>
       <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-      <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+      <script src="https://unpkg.com/tesseract.js@4.1.1/dist/tesseract.min.js"></script>
       <style>
           body {
               font-family: Arial, sans-serif;
@@ -19,65 +19,57 @@
               border-radius: 8px;
               box-shadow: 0 0 10px rgba(0,0,0,0.1);
           }
-          .workspace {
-              display: flex;
-              gap: 20px;
-              margin-top: 20px;
-          }
-          .text-panel {
-              flex: 1;
-              background-color: #f8f9fa;
-              padding: 15px;
-              border-radius: 8px;
-              max-width: 300px;
-          }
-          .preview-panel {
-              flex: 2;
+          .text-list {
+              height: 300px;
+              overflow-y: auto;
+              border: 1px solid #ddd;
+              padding: 10px;
+              margin: 10px 0;
+              background-color: white;
           }
           .text-item {
-              padding: 10px;
-              margin: 5px 0;
-              background-color: white;
-              border: 1px solid #ddd;
+              padding: 8px;
+              margin: 4px 0;
+              border: 1px solid #eee;
               border-radius: 4px;
               cursor: pointer;
-              transition: background-color 0.2s;
           }
           .text-item:hover {
-              background-color: #e9ecef;
+              background-color: #f0f0f0;
           }
           .text-item.selected {
-              background-color: #cce5ff;
-              border-color: #b8daff;
+              background-color: #e3f2fd;
+              border-color: #2196F3;
           }
-          .editor-controls {
+          .editor-section {
               margin: 20px 0;
               padding: 15px;
               background-color: #f8f9fa;
               border-radius: 4px;
           }
-          button {
-              background-color: #4CAF50;
-              color: white;
-              padding: 8px 16px;
-              border: none;
-              border-radius: 4px;
-              cursor: pointer;
-              margin: 5px;
-          }
-          button:hover {
-              background-color: #45a049;
-          }
-          button:disabled {
-              background-color: #cccccc;
-              cursor: not-allowed;
-          }
-          input[type="text"], input[type="file"] {
+          input[type="text"], textarea {
               width: 100%;
               padding: 8px;
               margin: 5px 0;
               border: 1px solid #ddd;
               border-radius: 4px;
+          }
+          textarea {
+              height: 100px;
+              resize: vertical;
+          }
+          button {
+              background-color: #4CAF50;
+              color: white;
+              padding: 10px 20px;
+              border: none;
+              border-radius: 4px;
+              cursor: pointer;
+              margin: 5px;
+          }
+          button:disabled {
+              background-color: #cccccc;
+              cursor: not-allowed;
           }
           .status {
               padding: 10px;
@@ -92,78 +84,121 @@
               background-color: #f8d7da;
               color: #721c24;
           }
-          #pdfPreview {
-              width: 100%;
-              height: 800px;
-              border: 1px solid #ddd;
+          #canvas-container {
+              margin-top: 20px;
+              overflow: auto;
+              max-height: 800px;
           }
-          .text-info {
-              font-size: 0.9em;
+          canvas {
+              border: 1px solid #ddd;
+              margin: 10px 0;
+          }
+          .page-info {
               color: #666;
-              margin-top: 5px;
+              margin: 5px 0;
           }
           .loading {
               position: fixed;
-              top: 50%;
-              left: 50%;
-              transform: translate(-50%, -50%);
+              top: 0;
+              left: 0;
+              width: 100%;
+              height: 100%;
               background: rgba(255, 255, 255, 0.9);
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              z-index: 1000;
+          }
+          .loading-content {
+              background: white;
               padding: 20px;
               border-radius: 8px;
               box-shadow: 0 0 10px rgba(0,0,0,0.1);
-              display: none;
+              text-align: center;
+          }
+          .progress-bar {
+              width: 100%;
+              height: 20px;
+              background-color: #f0f0f0;
+              border-radius: 10px;
+              overflow: hidden;
+              margin-top: 10px;
+          }
+          .progress {
+              width: 0%;
+              height: 100%;
+              background-color: #4CAF50;
+              transition: width 0.3s;
+          }
+          .language-selector {
+              margin: 10px 0;
           }
       </style>
   </head>
   <body>
       <div class="container">
-          <h1>محرر نصوص PDF</h1>
+          <h1>محرر نصوص PDF مع خاصية OCR</h1>
           
-          <div class="editor-controls">
-              <input type="file" id="pdfFile" accept=".pdf" />
+          <div class="editor-section">
+              <input type="file" id="pdfFile" accept="application/pdf" />
+              <div class="language-selector">
+                  <label>لغة OCR:</label>
+                  <select id="ocrLang">
+                      <option value="ara">العربية</option>
+                      <option value="eng">الإنجليزية</option>
+                      <option value="ara+eng">العربية + الإنجليزية</option>
+                  </select>
+              </div>
               <button onclick="loadPDF()">فتح الملف</button>
+              <button onclick="startOCR()">تشغيل OCR</button>
           </div>
 
           <div id="statusMessage" class="status"></div>
 
-          <div class="workspace">
-              <div class="text-panel">
-                  <h3>النصوص في الملف</h3>
-                  <div id="textList"></div>
-              </div>
-
-              <div class="preview-panel">
-                  <div class="editor-controls">
-                      <h3>تعديل النص المحدد</h3>
-                      <div>
-                          <label>النص الأصلي:</label>
-                          <input type="text" id="originalText" readonly />
-                          <div id="textInfo" class="text-info"></div>
-                      </div>
-                      <div>
-                          <label>النص الجديد:</label>
-                          <input type="text" id="newText" />
-                      </div>
-                      <button onclick="applyEdit()" id="editButton" disabled>تطبيق التعديل</button>
-                  </div>
-                  
-                  <iframe id="pdfPreview"></iframe>
-              </div>
+          <div class="editor-section">
+              <h3>النصوص المستخرجة</h3>
+              <div id="textList" class="text-list"></div>
           </div>
 
-          <div id="loadingMessage" class="loading">جاري المعالجة...</div>
+          <div class="editor-section">
+              <h3>تعديل النص</h3>
+              <div>
+                  <label>النص المكتشف:</label>
+                  <textarea id="ocrText" readonly></textarea>
+              </div>
+              <div>
+                  <label>النص المعدل:</label>
+                  <textarea id="editedText"></textarea>
+              </div>
+              <button onclick="applyChanges()" id="applyButton" disabled>تطبيق التعديلات</button>
+              <button onclick="downloadResult()" id="downloadButton" disabled>تحميل الملف المعدل</button>
+          </div>
+
+          <div id="canvas-container"></div>
+      </div>
+
+      <div id="loadingScreen" class="loading" style="display: none;">
+          <div class="loading-content">
+              <h3 id="loadingMessage">جاري المعالجة...</h3>
+              <div class="progress-bar">
+                  <div id="progressBar" class="progress"></div>
+              </div>
+          </div>
       </div>
 
       <script>
           pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
           let pdfDocument = null;
-          let pdfBytes = null;
-          let textItems = [];
-          let selectedTextItem = null;
+          let pdfPages = [];
+          let ocrResults = [];
+          let worker = null;
+          const scale = 1.5;
 
-          function showLoading(show = true) {
-              document.getElementById('loadingMessage').style.display = show ? 'block' : 'none';
+          function showLoading(show, message = 'جاري المعالجة...', progress = 0) {
+              document.getElementById('loadingScreen').style.display = show ? 'flex' : 'none';
+              document.getElementById('loadingMessage').textContent = message;
+              document.getElementById('progressBar').style.width = `${progress}%`;
           }
 
           function showStatus(message, isError = false) {
@@ -181,146 +216,178 @@
                   return;
               }
 
-              showLoading(true);
+              showLoading(true, 'جاري تحميل الملف...');
 
               try {
                   const arrayBuffer = await file.arrayBuffer();
-                  pdfBytes = new Uint8Array(arrayBuffer);
+                  const data = new Uint8Array(arrayBuffer);
 
-                  // تحميل PDF وعرضه
-                  pdfDocument = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
-                  
-                  // استخراج النصوص من جميع الصفحات
-                  textItems = [];
+                  pdfDocument = await pdfjsLib.getDocument({ data }).promise;
+                  pdfPages = [];
+                  ocrResults = [];
+
+                  document.getElementById('canvas-container').innerHTML = '';
+                  document.getElementById('textList').innerHTML = '';
+
                   for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
+                      showLoading(true, `جاري معالجة الصفحة ${pageNum} من ${pdfDocument.numPages}`,
+                          (pageNum / pdfDocument.numPages) * 100);
+
                       const page = await pdfDocument.getPage(pageNum);
-                      const textContent = await page.getTextContent();
-                      textItems.push(...textContent.items.map(item => ({
-                          ...item,
+                      const viewport = page.getViewport({ scale });
+
+                      const canvas = document.createElement('canvas');
+                      const context = canvas.getContext('2d');
+                      canvas.width = viewport.width;
+                      canvas.height = viewport.height;
+
+                      await page.render({
+                          canvasContext: context,
+                          viewport: viewport
+                      }).promise;
+
+                      pdfPages.push({
                           pageNum,
-                          fontSize: item.transform[0],
-                          fontFamily: item.fontName
-                      })));
+                          canvas,
+                          viewport
+                      });
+
+                      const pageContainer = document.createElement('div');
+                      pageContainer.appendChild(canvas);
+                      const pageInfo = document.createElement('div');
+                      pageInfo.className = 'page-info';
+                      pageInfo.textContent = `صفحة ${pageNum}`;
+                      pageContainer.appendChild(pageInfo);
+                      document.getElementById('canvas-container').appendChild(pageContainer);
                   }
 
-                  // عرض النصوص في القائمة
-                  displayTextList();
-                  
-                  // عرض PDF في الـ iframe
-                  const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-                  const url = URL.createObjectURL(blob);
-                  document.getElementById('pdfPreview').src = url;
-
-                  showStatus('تم تحميل الملف بنجاح');
+                  showStatus('تم تحميل الملف بنجاح. يمكنك الآن تشغيل OCR.');
+                  document.getElementById('applyButton').disabled = true;
+                  document.getElementById('downloadButton').disabled = true;
 
               } catch (error) {
                   console.error(error);
-                  showStatus('حدث خطأ أثناء تحميل الملف', true);
+                  showStatus('حدث خطأ أثناء تحميل الملف: ' + error.message, true);
               } finally {
                   showLoading(false);
               }
           }
 
-          function displayTextList() {
+          async function startOCR() {
+              if (!pdfPages.length) {
+                  showStatus('الرجاء تحميل ملف PDF أولاً', true);
+                  return;
+              }
+
+              const lang = document.getElementById('ocrLang').value;
+              showLoading(true, 'جاري تهيئة OCR...');
+
+              try {
+                  // إنشاء worker جديد لكل عملية OCR
+                  if (worker) {
+                      await worker.terminate();
+                  }
+                  worker = await Tesseract.createWorker();
+                  await worker.loadLanguage(lang);
+                  await worker.initialize(lang);
+                  
+                  ocrResults = [];
+
+                  for (let i = 0; i < pdfPages.length; i++) {
+                      const page = pdfPages[i];
+                      showLoading(true, `جاري معالجة الصفحة ${i + 1} من ${pdfPages.length}`,
+                          (i / pdfPages.length) * 100);
+
+                      const result = await worker.recognize(page.canvas);
+                      ocrResults.push({
+                          pageNum: page.pageNum,
+                          text: result.data.text
+                      });
+                  }
+
+                  await worker.terminate();
+                  worker = null;
+
+                  displayOCRResults();
+                  showStatus('تم اكتمال عملية OCR بنجاح');
+                  document.getElementById('applyButton').disabled = false;
+
+              } catch (error) {
+                  console.error(error);
+                  showStatus('حدث خطأ أثناء عملية OCR: ' + error.message, true);
+              } finally {
+                  showLoading(false);
+              }
+          }
+
+          function displayOCRResults() {
               const container = document.getElementById('textList');
               container.innerHTML = '';
 
-              textItems.forEach((item, index) => {
-                  if (item.str.trim()) {  // عرض النصوص غير الفارغة فقط
-                      const div = document.createElement('div');
-                      div.className = 'text-item';
-                      div.textContent = item.str;
-                      div.onclick = () => selectText(item, index);
-                      container.appendChild(div);
-                  }
+              ocrResults.forEach((result, index) => {
+                  const div = document.createElement('div');
+                  div.className = 'text-item';
+                  div.textContent = `[صفحة ${result.pageNum}] ${result.text.substring(0, 50)}...`;
+                  div.onclick = () => selectOCRText(result, index);
+                  container.appendChild(div);
               });
           }
 
-          function selectText(item, index) {
-              selectedTextItem = { ...item, index };
-              
-              // تحديث الواجهة
+          function selectOCRText(result, index) {
               document.querySelectorAll('.text-item').forEach(el => 
                   el.classList.remove('selected')
               );
               document.querySelectorAll('.text-item')[index].classList.add('selected');
               
-              // عرض معلومات النص
-              document.getElementById('originalText').value = item.str;
-              document.getElementById('newText').value = item.str;
-              document.getElementById('textInfo').textContent = 
-                  `الصفحة: ${item.pageNum} | حجم الخط: ${Math.round(item.fontSize)}px | نوع الخط: ${item.fontFamily}`;
-              
-              document.getElementById('editButton').disabled = false;
+              document.getElementById('ocrText').value = result.text;
+              document.getElementById('editedText').value = result.text;
+
+              const canvas = pdfPages[result.pageNum - 1].canvas;
+              canvas.scrollIntoView({ behavior: 'smooth' });
           }
 
-          async function applyEdit() {
-              if (!selectedTextItem) {
-                  showStatus('الرجاء تحديد نص للتعديل', true);
+          async function applyChanges() {
+              const editedText = document.getElementById('editedText').value;
+              if (!editedText) {
+                  showStatus('الرجاء إدخال النص المعدل', true);
                   return;
               }
 
-              const newText = document.getElementById('newText').value;
-              if (!newText) {
-                  showStatus('الرجاء إدخال النص الجديد', true);
-                  return;
-              }
-
-              showLoading(true);
+              showLoading(true, 'جاري تطبيق التعديلات...');
 
               try {
-                  // تحميل PDF باستخدام PDF-LIB
-                  const pdfDoc = await PDFLib.PDFDocument.load(pdfBytes);
-                  const page = pdfDoc.getPages()[selectedTextItem.pageNum - 1];
-
-                  // إضافة النص الجديد
-                  const font = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+                  const selectedIndex = Array.from(document.querySelectorAll('.text-item'))
+                      .findIndex(el => el.classList.contains('selected'));
                   
-                  // حذف النص القديم (إضافة مستطيل أبيض فوقه)
-                  page.drawRectangle({
-                      x: selectedTextItem.transform[4],
-                      y: selectedTextItem.transform[5],
-                      width: selectedTextItem.width,
-                      height: selectedTextItem.height,
-                      color: PDFLib.rgb(1, 1, 1),  // أبيض
-                  });
-
-                  // إضافة النص الجديد
-                  page.drawText(newText, {
-                      x: selectedTextItem.transform[4],
-                      y: selectedTextItem.transform[5],
-                      size: selectedTextItem.fontSize,
-                      font: font
-                  });
-
-                  // حفظ التغييرات
-                  const modifiedPdfBytes = await pdfDoc.save();
-                  
-                  // تحديث العرض والتحميل
-                  const blob = new Blob([modifiedPdfBytes], { type: 'application/pdf' });
-                  const url = URL.createObjectURL(blob);
-                  
-                  // تحديث المعاينة
-                  document.getElementById('pdfPreview').src = url;
-                  
-                  // إنشاء رابط التحميل
-                  const link = document.createElement('a');
-                  link.href = url;
-                  link.download = 'modified.pdf';
-                  link.click();
-
-                  showStatus('تم تعديل النص بنجاح');
-                  
-                  // تحديث البيانات المحلية
-                  pdfBytes = modifiedPdfBytes;
-                  await loadPDF();  // إعادة تحميل الملف لتحديث قائمة النصوص
+                  if (selectedIndex !== -1) {
+                      ocrResults[selectedIndex].text = editedText;
+                      displayOCRResults();
+                      document.getElementById('downloadButton').disabled = false;
+                      showStatus('تم تطبيق التعديلات بنجاح');
+                  }
 
               } catch (error) {
                   console.error(error);
-                  showStatus('حدث خطأ أثناء تعديل النص: ' + error.message, true);
+                  showStatus('حدث خطأ أثناء تطبيق التعديلات: ' + error.message, true);
               } finally {
                   showLoading(false);
               }
+          }
+
+          function downloadResult() {
+              const text = ocrResults.map(result => 
+                  `=== صفحة ${result.pageNum} ===\n${result.text}\n\n`
+              ).join('');
+
+              const blob = new Blob([text], { type: 'text/plain' });
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement('a');
+              link.href = url;
+              link.download = 'ocr-result.txt';
+              link.click();
+              URL.revokeObjectURL(url);
+
+              showStatus('تم تحميل النتائج بنجاح');
           }
       </script>
   </body>
