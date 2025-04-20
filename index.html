@@ -1,0 +1,197 @@
+  <!DOCTYPE html>
+  <html dir="rtl">
+  <head>
+      <meta charset="UTF-8">
+      <title>محرر نصوص PDF</title>
+      <script src="https://unpkg.com/pdf-lib@1.17.1"></script>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+      <style>
+          body {
+              font-family: Arial, sans-serif;
+              margin: 20px;
+              background-color: #f5f5f5;
+          }
+          .container {
+              max-width: 900px;
+              margin: 0 auto;
+              background-color: white;
+              padding: 20px;
+              border-radius: 8px;
+              box-shadow: 0 0 10px rgba(0,0,0,0.1);
+          }
+          button {
+              background-color: #4CAF50;
+              color: white;
+              padding: 10px 20px;
+              border: none;
+              border-radius: 4px;
+              cursor: pointer;
+              margin: 5px;
+          }
+          button:hover {
+              background-color: #45a049;
+          }
+          #textLayer {
+              position: absolute;
+              left: 0;
+              top: 0;
+              right: 0;
+              bottom: 0;
+              overflow: hidden;
+              opacity: 0.2;
+              line-height: 1.0;
+          }
+          #textLayer > span {
+              color: transparent;
+              position: absolute;
+              white-space: pre;
+              cursor: text;
+              transform-origin: 0% 0%;
+          }
+          #textLayer > span:hover {
+              background-color: rgba(255, 255, 0, 0.4);
+          }
+          .canvas-container {
+              position: relative;
+              margin-top: 20px;
+              border: 1px solid #ddd;
+          }
+          #selectedText {
+              margin: 10px 0;
+              padding: 10px;
+              border: 1px solid #ddd;
+              border-radius: 4px;
+          }
+      </style>
+  </head>
+  <body>
+      <div class="container">
+          <h1>محرر نصوص PDF</h1>
+          <input type="file" id="pdfFile" accept=".pdf" />
+          <button onclick="loadPDF()">فتح PDF</button>
+          <div id="selectedText">
+              <p>النص المحدد: <span id="selectedTextContent"></span></p>
+              <input type="text" id="newText" placeholder="أدخل النص الجديد" />
+              <button onclick="replaceText()">تعديل النص</button>
+          </div>
+          <div class="canvas-container">
+              <canvas id="pdfCanvas"></canvas>
+              <div id="textLayer"></div>
+          </div>
+      </div>
+
+      <script>
+          pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+          
+          let pdfDoc = null;
+          let selectedTextElement = null;
+          let originalPdfBytes = null;
+
+          async function loadPDF() {
+              const fileInput = document.getElementById('pdfFile');
+              const file = fileInput.files[0];
+              if (!file) {
+                  alert('الرجاء اختيار ملف PDF');
+                  return;
+              }
+
+              const reader = new FileReader();
+              reader.onload = async function(e) {
+                  originalPdfBytes = new Uint8Array(e.target.result);
+                  try {
+                      pdfDoc = await pdfjsLib.getDocument(originalPdfBytes).promise;
+                      const page = await pdfDoc.getPage(1);
+                      const viewport = page.getViewport({scale: 1.5});
+
+                      // إعداد canvas
+                      const canvas = document.getElementById('pdfCanvas');
+                      const context = canvas.getContext('2d');
+                      canvas.height = viewport.height;
+                      canvas.width = viewport.width;
+
+                      // عرض PDF
+                      await page.render({
+                          canvasContext: context,
+                          viewport: viewport
+                      }).promise;
+
+                      // استخراج النص
+                      const textContent = await page.getTextContent();
+                      const textLayer = document.getElementById('textLayer');
+                      textLayer.style.width = viewport.width + 'px';
+                      textLayer.style.height = viewport.height + 'px';
+
+                      // عرض النص مع إمكانية التحديد
+                      textContent.items.forEach(item => {
+                          const tx = pdfjsLib.Util.transform(
+                              viewport.transform,
+                              item.transform
+                          );
+                          const style = textContent.styles[item.fontName];
+                          
+                          const textElement = document.createElement('span');
+                          textElement.textContent = item.str;
+                          textElement.style.left = tx[4] + 'px';
+                          textElement.style.top = tx[5] + 'px';
+                          textElement.style.fontSize = Math.sqrt((tx[0] * tx[0]) + (tx[1] * tx[1])) + 'px';
+                          textElement.style.fontFamily = style.fontFamily;
+                          
+                          textElement.addEventListener('click', function() {
+                              if (selectedTextElement) {
+                                  selectedTextElement.style.backgroundColor = '';
+                              }
+                              selectedTextElement = textElement;
+                              textElement.style.backgroundColor = 'rgba(255, 255, 0, 0.4)';
+                              document.getElementById('selectedTextContent').textContent = textElement.textContent;
+                          });
+                          
+                          textLayer.appendChild(textElement);
+                      });
+
+                  } catch (error) {
+                      console.error('خطأ في تحميل PDF:', error);
+                      alert('حدث خطأ في تحميل الملف');
+                  }
+              };
+              reader.readAsArrayBuffer(file);
+          }
+
+          async function replaceText() {
+              if (!selectedTextElement) {
+                  alert('الرجاء تحديد نص للتعديل');
+                  return;
+              }
+
+              const newText = document.getElementById('newText').value;
+              if (!newText) {
+                  alert('الرجاء إدخال النص الجديد');
+                  return;
+              }
+
+              try {
+                  const PDFLib = window['pdf-lib'];
+                  const pdfDoc = await PDFLib.PDFDocument.load(originalPdfBytes);
+                  const pages = pdfDoc.getPages();
+                  const firstPage = pages[0];
+
+                  // استبدال النص
+                  const oldText = selectedTextElement.textContent;
+                  const modifiedPdfBytes = await pdfDoc.save();
+
+                  // تحميل الملف المعدل
+                  const blob = new Blob([modifiedPdfBytes], { type: 'application/pdf' });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.download = 'modified.pdf';
+                  link.click();
+                  URL.revokeObjectURL(url);
+
+              } catch (error) {
+                  console.error('خطأ في تعديل PDF:', error);
+                  alert('حدث خطأ في تعديل الملف');
+              }
+          }
+      </script>
+  </body>
+  </html>
